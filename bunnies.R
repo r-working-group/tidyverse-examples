@@ -44,8 +44,6 @@ mean_end <- bunnies %>%
 
 # Double-check if multiple dates per month?
 bunnies %>%
-  mutate(year = year(date),
-         month = month(date)) %>%
   group_by(year, month, route) %>%
   distinct(date) %>%
   filter(n() > 1)
