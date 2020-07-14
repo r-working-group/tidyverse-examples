@@ -16,7 +16,7 @@ library(ggthemes)
 # Stylesheet for metadata conversion into program: John H. Porter, Univ. Virginia, jporter@Virginia.edu 
 
 infile1 <- trimws("http://pasta.lternet.edu/package/data/eml/knb-lter-jrn/210086006/83/95929035c0259ea562f4aab7dcc4c10f") 
-bunnies <- read_csv(infile1,
+bunnies_in <- read_csv(infile1,
                  col_types=list( 
                    col_datetime("%Y-%m-%d %H:%M:%S"), 
                    col_character(),  
@@ -30,33 +30,73 @@ bunnies <- read_csv(infile1,
                  na=c(" ",".","NA")  ) %>%
   mutate(date = as.Date(date_time),
          year = year(date),
-         month = month(date),
          quarter = factor(quarter(date),
                           levels = 1:4,
-                          labels = paste0("Q",1:4))) %>%
-  filter(!(is.na(date) & !(species %in% c("END","GATE","START"))))  ## needs to be verified by John A. 
+                          labels = paste0("Q",1:4)))  
+########
+#### Check out time
+########
+
+## Are there any missing dates? 
+bunnies_in %>%
+  filter(is.na(date)) %>%
+  filter(!(species %in% c("END","GATE","START"))) ## needs to be verified by John A.
+
+## Are any quarters missing? 
+bunnies_in %>%
+  filter(!is.na(date) & !(species %in% c("END","GATE","START"))) %>%
+  group_by(year) %>%
+  distinct(quarter) %>%
+  count() %>%
+  filter(n < 4)
+
+## Are there quarters with more than one sampling? 
+bunnies_in %>%
+  group_by(year, quarter, route) %>%
+  distinct(date) %>%
+  count() %>%
+  filter(n > 1)
+
+## Incorporate these temporal insights downstream (just first two,
+## multi-quarter sampling should be done after densities calculated)
+bunnies_qrt <- bunnies_in %>%
+  filter(!(is.na(date) & !(species %in% c("END","GATE","START")))) %>%
+  filter(year %in% 1997:2018)
+
+
+########
+#### Check out mileage 
+########
+
+## Are there any missing mileage END values? 
+bunnies_qrt %>%
+  filter(species == "END" & is.na(mileage))
+
+## Is END mileage consistent through time? 
+bunnies_qrt %>%
+  filter(species == "END" & !is.na(mileage)) %>%
+  group_by(route) %>%
+  summarise(r_min = min(mileage),
+            r_mean = mean(mileage),
+            r_max = max(mileage))
 
 ## Find mean END mileage to fill missing ones
-mean_end <- bunnies %>%
+mean_end <- bunnies_qrt %>%
   filter(species == "END" & !is.na(mileage) & mileage > 1) %>%
   group_by(route) %>%
   summarise(mean_end = mean(mileage))
 
-# Double-check if multiple dates per month?
-bunnies %>%
-  group_by(year, month, route) %>%
-  distinct(date) %>%
-  filter(n() > 1)
-# No, so can use dates as unique sampling event identifier
-
 ## Find sampling event route ends
-ends <- bunnies %>%
+ends <- bunnies_qrt %>%
   filter(species == "END" & !is.na(mileage))  %>%
   group_by(date,route) %>%
   summarise(route_end = mileage) 
 
-## Calculate the seasonal density
-dens_bunnies <- bunnies %>%
+########
+## Calculate the quarterly density
+########
+
+dens_bunnies <- bunnies_qrt %>%
   filter(species %in% c("LECA","SYAU")) %>% # only count species rows
   left_join(ends) %>%
   left_join(mean_end) %>%
@@ -69,7 +109,6 @@ dens_bunnies <- bunnies %>%
   ungroup %>%
   complete(year, quarter, species, route, 
            fill = list(mean_density = 0)) %>% # zero observed rabbits
-  filter(year %in% 1997:2018) %>% # only include complete years
   mutate(route = factor(route, 
                         levels = c(1,3), 
                         labels = c("Creosote", "Grassland")))
